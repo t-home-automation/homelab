@@ -1,0 +1,78 @@
+graph TB
+    subgraph clients["Client Devices"]
+        Phone["📱 Phone<br/>192.168.68.53"]
+        PC["💻 PC<br/>192.168.68.60"]
+        MacBook["💻 MacBook Air M4<br/>(arriving this week)"]
+        TV["📺 TV / other devices"]
+    end
+
+    subgraph public["Public Internet"]
+        Infomaniak["Infomaniak DNS<br/>alarconrivero.dev"]
+    end
+
+    subgraph hetzner["Hetzner VPS — wireguard-gateway"]
+        Caddy["Caddy<br/>reverse proxy + auto-HTTPS"]
+    end
+
+    WG["🔒 WireGuard Tunnel<br/>10.99.0.2 ↔ 10.99.0.1"]
+
+    subgraph pfsense["pfSense (VM 100)"]
+        DNSRes["DNS Resolver<br/>host overrides"]
+        WGif["WG_HETZNER interface"]
+        HAProxy["HAProxy<br/>services_frontend / proxmox_frontend"]
+    end
+
+    subgraph proxmox["Proxmox Host — mini PC"]
+        HA["Home Assistant OS<br/>VM 110 — 10.0.0.20"]
+        DockerHostVM["docker-host<br/>VM 120 — 10.0.0.21"]
+    end
+
+    subgraph dockerhost["docker-host services"]
+        Jellyfin["Jellyfin"]
+        Nextcloud["Nextcloud"]
+        Immich["Immich"]
+        Syncthing["Syncthing"]
+        Books["Calibre-Web / Books"]
+        Servarr["Servarr stack<br/>(gluetun, qBittorrent — live;<br/>sonarr/radarr/prowlarr/bazarr/lidarr/shelfmark — planned)"]
+    end
+
+    Proxmox_UI["Proxmox WebUI"]
+    pfSense_UI["pfSense WebUI"]
+
+    %% External path
+    Phone -.->|external| Infomaniak
+    PC -.->|external| Infomaniak
+    MacBook -.->|external| Infomaniak
+    Infomaniak --> Caddy
+    Caddy --> WG
+    WG --> WGif
+    WGif --> HAProxy
+
+    %% Internal/LAN path
+    Phone -->|LAN| DNSRes
+    PC -->|LAN| DNSRes
+    TV -->|LAN| DNSRes
+    DNSRes --> HAProxy
+
+    %% HAProxy routing
+    HAProxy -->|services_frontend ACLs| Jellyfin
+    HAProxy --> Nextcloud
+    HAProxy --> Immich
+    HAProxy --> Syncthing
+    HAProxy --> Books
+    HAProxy -.->|not yet exposed externally| Servarr
+    HAProxy -->|proxmox_frontend| Proxmox_UI
+    HAProxy --> pfSense_UI
+
+    %% Physical hosting
+    proxmox --> HA
+    proxmox --> DockerHostVM
+    DockerHostVM --> dockerhost
+
+    classDef live fill:#d4edda,stroke:#28a745
+    classDef planned fill:#fff3cd,stroke:#ffc107,stroke-dasharray: 5 5
+    classDef external fill:#cce5ff,stroke:#004085
+
+    class Jellyfin,Nextcloud,Immich,Syncthing,Books live
+    class Servarr planned
+    class Infomaniak,Caddy external

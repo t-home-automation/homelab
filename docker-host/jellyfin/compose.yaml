@@ -1,0 +1,20 @@
+services:
+  jellyfin:
+    image: lscr.io/linuxserver/jellyfin:latest
+    container_name: jellyfin
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    volumes:
+      - ./config:/config
+      - /data:/data
+    devices:
+      - /dev/dri:/dev/dri #Use for Intel QuickSync
+    ports:
+      - 8096:8096
+# Needed for local DLNA discovery, but with the pfsense dns not needed
+#      - 7359:7359/udp #Service Discovery
+#      - 1900:1900/udp #Client Discovery
+    restart: unless-stopped
+# Remove the Jellyfin service if installed directly on system.

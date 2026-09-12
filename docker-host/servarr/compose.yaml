@@ -1,0 +1,123 @@
+# Compose file for the *arr stack. Configuration files are stored in the
+# directory you launch the compose file on. Change to bind mounts if needed.
+# All containers are ran with user and group ids of the main user and
+# group to avoid permissions issues of downloaded files, please refer
+# the read me file for more information.
+
+#############################################################################
+# Based on: https://github.com/TechHutTV/homelab/tree/main/media
+# Adapted for ProtonVPN (NAT-PMP port forwarding) instead of AirVPN, and for
+# a single consolidated .env instead of a split .env/secrets.env — see the
+# README in this folder for why.
+#############################################################################
+
+networks:
+  servarrnetwork:
+    name: servarrnetwork
+    ipam:
+      config:
+        - subnet: 172.39.0.0/24
+
+services:
+  gluetun:
+    image: qmcgaw/gluetun
+    container_name: gluetun
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun # If running on an LXC see readme for more info.
+    networks:
+      servarrnetwork:
+        ipv4_address: ${SET_IP_GLUETUN}
+    ports:
+      - 8090:8090 # qbittorrent web interface, port swapped because nextcloud runs on 8080 internally
+      - 8000:8000 # gluetun control server API - needed for the port-forward sync tool
+      - 6789:6789 # nzbget
+      - 9696:9696 # prowlarr
+      - 8191:8191 # flaresolverr
+    volumes:
+      - ./gluetun:/gluetun
+      - ./gluetun/auth/config.toml:/gluetun/auth/config.toml
+    env_file:
+      - .env
+    environment:
+      - HTTP_CONTROL_SERVER_ADDRESS=:8000
+    healthcheck:
+      test: ping -c 1 www.google.com || exit 1
+      interval: 20s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    container_name: qbittorrent
+    restart: unless-stopped
+    labels:
+      - deunhealth.restart.on.unhealthy=true
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+      - WEBUI_PORT=8090 # must match "qbittorrent web interface" port number in gluetun's service above
+    volumes:
+      - ./qbittorrent:/config
+      - /data:/data
+    depends_on:
+      gluetun:
+        condition: service_healthy
+        restart: true
+    network_mode: service:gluetun
+    healthcheck:
+      test: ping -c 1 www.google.com || exit 1
+      interval: 60s
+      retries: 3
+      start_period: 20s
+      timeout: 10s
+
+  # ACTIVE: syncs qBittorrent's listening port to Gluetun's ProtonVPN-forwarded
+  # port using qBittorrent's API key (Bearer auth) — sidesteps qBittorrent
+  # 5.x's 204 login-response issue that broke ADXGlock/qb-port-sync (see below
+  # and the README in this folder).
+  qbittorrent-port-forward-gluetun-server:
+    image: kirari04/qbittorrent-port-forward-gluetun-server:latest
+    container_name: qb-port-sync
+    network_mode: service:gluetun
+    depends_on:
+      gluetun:
+        condition: service_healthy
+      qbittorrent:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      - QBT_ADDR=http://localhost:8090
+      - GTN_ADDR=http://localhost:8000
+    restart: unless-stopped
+
+  # --- Swap back in once ADXGlock/qb-port-sync PR #1 is merged/released ---
+  # https://github.com/ADXGlock/qb-port-sync/pull/1
+  # qb-port-sync:
+  #   image: adxglock/qb-port-sync:latest
+  #   container_name: qb-port-sync
+  #   network_mode: service:gluetun
+  #   depends_on:
+  #     gluetun:
+  #       condition: service_healthy
+  #     qbittorrent:
+  #       condition: service_healthy
+  #   env_file:
+  #     - .env
+  #   environment:
+  #     - GLUETUN_API=http://localhost:8000/v1/portforward
+  #     - QBITTORRENT_HOST=http://localhost:8090
+  #     - QBITTORRENT_USER=admin
+  #     - CHECK_INTERVAL=300
+  #     - MONITOR_FIREWALL=true
+  #     - QBT_CONTAINER_NAME=qbittorrent
+  #   volumes:
+  #     - /var/run/docker.sock:/var/run/docker.sock
+  #   restart: unless-stopped
+
+  # --- Not yet added: sonarr, radarr, prowlarr, bazarr, lidarr, nzbget,
+  #     flaresolverr, seerr, shelfmark. See README TODOs. ---
